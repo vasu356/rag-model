@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+venv/
+.env
+*.egg-info/
+node_modules/
+dist/
+.DS_Store
+.vite/
+*.local
+/tmp/rag_uploads/
