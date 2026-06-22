@@ -1,11 +1,40 @@
+# Python
 __pycache__/
 *.py[cod]
-venv/
-.env
 *.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+*.log
+
+# Environment
+.env
+.env.local
+.env.production
+*.local
+
+# Node / frontend
 node_modules/
 dist/
-.DS_Store
 .vite/
-*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Uploads
 /tmp/rag_uploads/
+
+# HuggingFace model cache (downloaded on first run)
+~/.cache/huggingface/

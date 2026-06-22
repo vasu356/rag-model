@@ -1,0 +1,35 @@
+# =============================================================================
+# RAGLab — Docker Compose
+# =============================================================================
+# Start both services:
+#   docker compose up --build
+#
+# Frontend: http://localhost:3000
+# Backend:  http://localhost:8000
+# API docs: http://localhost:8000/docs
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - rag_uploads:/tmp/rag_uploads
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  rag_uploads:

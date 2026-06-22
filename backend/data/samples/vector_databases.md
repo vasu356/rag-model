@@ -1,54 +1,56 @@
-# Vector Databases: The Memory Layer for AI
+﻿# Vector Databases: The Memory Layer for AI
 
 ## Introduction
 
-A vector database is a specialized data store designed to efficiently store, index, and search high-dimensional vectors — the numerical representations (embeddings) that encode the semantic meaning of text, images, audio, and more.
+A vector database is a specialized data store designed to efficiently store, index, and search high-dimensional vectors, the numerical representations that encode semantic meaning in text, images, audio, and more.
 
-As AI applications proliferate, vector databases have become the critical "long-term memory" layer for LLM-powered systems like RAG pipelines, semantic search engines, and recommendation systems.
+As AI applications proliferate, vector databases have become the long-term memory layer for RAG pipelines, semantic search engines, and recommendation systems.
 
 ## How Vector Search Works
 
-Traditional databases search by exact match or range queries on structured fields. Vector databases search by **similarity** — finding the nearest neighbors to a query vector in high-dimensional space.
+Traditional databases search by exact match or range queries on structured fields. Vector databases search by similarity, finding the nearest neighbors to a query vector in high-dimensional space.
 
 ### Approximate Nearest Neighbor (ANN)
 
-Exhaustive search over millions of vectors is impractical. ANN algorithms trade a small accuracy loss for massive speed gains:
+Exhaustive search over millions of vectors is impractical. ANN algorithms trade a small accuracy loss for major speed gains:
 
-- **HNSW** (Hierarchical Navigable Small World): Graph-based index. Excellent recall/speed tradeoff. Used by Weaviate, Qdrant.
-- **IVF** (Inverted File Index): Clusters vectors into buckets, searches only nearby clusters. Used by FAISS.
+- **HNSW** (Hierarchical Navigable Small World): Graph-based index with an excellent recall-speed tradeoff.
+- **IVF** (Inverted File Index): Clusters vectors into buckets and searches only nearby clusters.
 - **LSH** (Locality Sensitive Hashing): Hash-based bucketing for sub-linear search.
 - **ScaNN** (Google): Production-grade ANN with learned quantization.
 
 ## Similarity Metrics
 
-- **Cosine similarity**: Angle between vectors. Best for text embeddings (magnitude-invariant).
-- **Dot product**: Fast, used when embeddings are normalized.
-- **Euclidean (L2) distance**: Geometric distance. Used for image and audio embeddings.
+- **Cosine similarity**: Angle between vectors. Best for text embeddings because it is magnitude invariant.
+- **Dot product**: Fast and commonly used when embeddings are normalized.
+- **Euclidean (L2) distance**: Geometric distance, often used for image and audio embeddings.
 
 ## Popular Vector Databases
 
 ### FAISS (Meta AI)
-Open-source library (not a full DB). Extremely fast, GPU-accelerated. Best for in-memory or research use cases.
+Open-source library, not a full database. Extremely fast and GPU-accelerated. Best for in-memory or research use cases.
 
 ### Chroma
-Open-source, developer-friendly. Excellent for local development and small-to-medium RAG apps. Persistent storage with SQLite backend.
+Open-source and developer-friendly. Good for local development and small-to-medium RAG apps.
 
 ### Pinecone
-Managed cloud service. Serverless pricing, production-grade scalability. Supports metadata filtering alongside vector search.
+Managed cloud service with serverless pricing and production-grade scalability.
 
 ### Weaviate
-Open-source with cloud option. Supports hybrid search (BM25 + vector). Schema-based with GraphQL API.
+Open-source with a cloud option. Supports hybrid search with BM25 plus vector search.
 
 ### Qdrant
-Rust-based, high performance. Rich filtering. Excellent for self-hosting.
+Rust-based, high performance, and rich filtering. Excellent for self-hosting.
 
 ## Metadata Filtering
 
-Modern vector DBs support filtering on metadata fields alongside vector similarity:
-```
+Modern vector databases support filtering on metadata fields alongside vector similarity:
+
+```text
 query: "machine learning basics"
 filter: {source: "textbook", year: {$gte: 2020}}
 ```
+
 This enables precise retrieval without sacrificing semantic search.
 
 ## Choosing the Right Store

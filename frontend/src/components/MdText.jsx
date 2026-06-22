@@ -1,16 +1,50 @@
-export default function MdText({ text }) {
+﻿export default function MdText({ text }) {
   if (!text) return null;
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+
+  const renderInline = (segment, keyPrefix) => {
+    const parts = segment.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+    return parts.map((part, index) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return <strong key={`${keyPrefix}-strong-${index}`}>{part.slice(2, -2)}</strong>;
+      }
+      if (part.startsWith("`") && part.endsWith("`")) {
+        return <code key={`${keyPrefix}-code-${index}`}>{part.slice(1, -1)}</code>;
+      }
+      return <span key={`${keyPrefix}-text-${index}`}>{part}</span>;
+    });
+  };
+
+  const blocks = text.split(/\n\s*\n/).map(block => block.trim()).filter(Boolean);
+
   return (
-    <p>
-      {parts.map((p, i) => {
-        if (p.startsWith("**") && p.endsWith("**")) return <strong key={i}>{p.slice(2, -2)}</strong>;
-        if (p.startsWith("`") && p.endsWith("`")) return <code key={i}>{p.slice(1, -1)}</code>;
-        const lines = p.split("\n");
-        return lines.map((line, j) => (
-          <span key={`${i}-${j}`}>{line}{j < lines.length - 1 && <br />}</span>
-        ));
+    <div className="md-text">
+      {blocks.map((block, blockIndex) => {
+        const lines = block.split("\n").map(line => line.trim()).filter(Boolean);
+        const isList = lines.length > 0 && lines.every(line => /^(- |\* |\d+\. )/.test(line));
+
+        if (isList) {
+          return (
+            <ul key={`block-${blockIndex}`}>
+              {lines.map((line, lineIndex) => (
+                <li key={`block-${blockIndex}-item-${lineIndex}`}>
+                  {renderInline(line.replace(/^(- |\* |\d+\. )/, ""), `block-${blockIndex}-item-${lineIndex}`)}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+
+        return (
+          <p key={`block-${blockIndex}`}>
+            {lines.map((line, lineIndex) => (
+              <span key={`block-${blockIndex}-line-${lineIndex}`}>
+                {renderInline(line, `block-${blockIndex}-line-${lineIndex}`)}
+                {lineIndex < lines.length - 1 && <br />}
+              </span>
+            ))}
+          </p>
+        );
       })}
-    </p>
+    </div>
   );
 }

@@ -1,14 +1,38 @@
+﻿/**
+ * RAGLab — Main Application Component
+ *
+ * State management for the full RAG pipeline:
+ *   Setup → Index → Query (SSE streaming) → Display
+ */
+
 import { useState, useRef, useEffect, useCallback } from "react";
 import Header from "./components/Header";
 import SetupPanel from "./components/SetupPanel";
 import ChatPanel from "./components/ChatPanel";
 import SidebarPanel from "./components/SidebarPanel";
 
-const API = "http://localhost:8000";
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const ROLE = { USER: "user", AI: "ai", SYSTEM: "system" };
 
+/**
+ * Safely parse a JSON event from an SSE data line.
+ * Returns null on failure.
+ */
+function parseSSE(line) {
+  if (!line.startsWith("data: ")) return null;
+  try {
+    return JSON.parse(line.slice(6));
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
-  const [phase, setPhase] = useState("idle");
+  // ---- State -------------------------------------------------------------
+  const [phase, setPhase] = useState("idle"); // idle | indexing | ready
   const [sessionId, setSessionId] = useState(null);
   const [sessionMeta, setSessionMeta] = useState(null);
   const [samples, setSamples] = useState([]);
@@ -18,7 +42,11 @@ export default function App() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [qualityMap, setQualityMap] = useState({});
+  const [sourceMap, setSourceMap] = useState({});
   const [activeTab, setActiveTab] = useState("samples");
+  const [error, setError] = useState(null);
+
+  // Retrieval parameters
   const [topK, setTopK] = useState(4);
   const [alphaDense, setAlphaDense] = useState(0.65);
   const [alphaBm25, setAlphaBm25] = useState(0.35);
@@ -33,79 +61,120 @@ export default function App() {
     return `m_${Date.now()}_${msgSeqRef.current}`;
   }, []);
 
+  // ---- Fetch samples on mount -------------------------------------------
   useEffect(() => {
-    fetch(`${API}/samples`).then(r => r.json()).then(d => setSamples(d.samples || [])).catch(() => {});
+    fetch(`${API_BASE}/samples`)
+      .then((r) => r.json())
+      .then((d) => setSamples(d.samples || []))
+      .catch(() => {});
   }, []);
 
+  // ---- Auto-scroll -------------------------------------------------------
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streaming]);
 
-  const appendMessage = useCallback((role, content, id) => {
-    const msgId = id || nextMsgId();
-    setMessages(prev => [...prev, { role, content, id: msgId }]);
-    return msgId;
-  }, [nextMsgId]);
+  // ---- Message helpers ---------------------------------------------------
+  const appendMessage = useCallback(
+    (role, content, id) => {
+      const msgId = id || nextMsgId();
+      setMessages((prev) => [...prev, { role, content, id: msgId }]);
+      return msgId;
+    },
+    [nextMsgId],
+  );
 
   const appendToken = useCallback((msgId, token) => {
-    setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, content: m.content + token } : m)));
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === msgId ? { ...m, content: m.content + token } : m,
+      ),
+    );
   }, []);
 
+  // ---- Indexing ----------------------------------------------------------
   const indexSamples = async () => {
     if (!selectedSamples.length) return;
     setPhase("indexing");
+    setError(null);
     try {
-      const res = await fetch(`${API}/index/samples`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(selectedSamples) });
+      const res = await fetch(`${API_BASE}/index/samples`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(selectedSamples),
+      });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setSessionId(data.session_id);
       setSessionMeta(data);
       setPhase("ready");
-      setMessages([{ role: ROLE.SYSTEM, content: `✓ Indexed **${data.doc_count}** document${data.doc_count !== 1 ? "s" : ""} → **${data.chunk_count}** chunks. Ask me anything about the content.`, id: nextMsgId() }]);
+      setMessages([
+        {
+          role: ROLE.SYSTEM,
+          content: `✓ Indexed **${data.doc_count}** document${data.doc_count !== 1 ? "s" : ""} → **${data.chunk_count}** chunks. Ask me anything about the content.`,
+          id: nextMsgId(),
+        },
+      ]);
     } catch (e) {
       setPhase("idle");
-      alert("Indexing failed: " + e.message);
+      setError(`Indexing failed: ${e.message}`);
     }
   };
 
   const indexUpload = async () => {
     if (!uploadFiles.length) return;
     setPhase("indexing");
+    setError(null);
     const form = new FormData();
-    uploadFiles.forEach(f => form.append("files", f));
+    uploadFiles.forEach((f) => form.append("files", f));
     try {
-      const res = await fetch(`${API}/index/upload`, { method: "POST", body: form });
+      const res = await fetch(`${API_BASE}/index/upload`, {
+        method: "POST",
+        body: form,
+      });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setSessionId(data.session_id);
       setSessionMeta(data);
       setPhase("ready");
-      setMessages([{ role: ROLE.SYSTEM, content: `✓ Uploaded & indexed **${data.doc_count}** file${data.doc_count !== 1 ? "s" : ""} → **${data.chunk_count}** chunks. Ask me anything.`, id: nextMsgId() }]);
+      setMessages([
+        {
+          role: ROLE.SYSTEM,
+          content: `✓ Uploaded & indexed **${data.doc_count}** file${data.doc_count !== 1 ? "s" : ""} → **${data.chunk_count}** chunks. Ask me anything.`,
+          id: nextMsgId(),
+        },
+      ]);
     } catch (e) {
       setPhase("idle");
-      alert("Upload failed: " + e.message);
+      setError(`Upload failed: ${e.message}`);
     }
   };
 
+  // ---- Query / SSE streaming --------------------------------------------
   const query = async () => {
     const q = input.trim();
     if (!q || !sessionId || streaming) return;
+
     setInput("");
     setStreaming(true);
+    setError(null);
+
+    // Add user message immediately
     appendMessage(ROLE.USER, q);
     const aiId = nextMsgId();
-    setMessages(prev => [...prev, { role: ROLE.AI, content: "", id: aiId }]);
+    setMessages((prev) => [...prev, { role: ROLE.AI, content: "", id: aiId }]);
 
     try {
+      // Build chat history for context (last 12 turns)
       const chatHistory = [
         ...messages
-          .filter(m => m.role === ROLE.USER || m.role === ROLE.AI)
+          .filter((m) => m.role === ROLE.USER || m.role === ROLE.AI)
           .slice(-12)
-          .map(m => ({ role: m.role, content: m.content })),
+          .map((m) => ({ role: m.role, content: m.content })),
         { role: ROLE.USER, content: q },
       ];
 
-      const res = await fetch(`${API}/query/stream`, {
+      const res = await fetch(`${API_BASE}/query/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -118,21 +187,44 @@ export default function App() {
           chat_history: chatHistory,
         }),
       });
+
+      if (!res.ok) {
+        const errBody = await res.text();
+        throw new Error(errBody || `HTTP ${res.status}`);
+      }
+
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const lines = decoder.decode(value).split("\n").filter(l => l.startsWith("data: "));
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk
+          .split("\n")
+          .filter((l) => l.startsWith("data: "));
+
         for (const line of lines) {
-          try {
-            const evt = JSON.parse(line.slice(6));
-            if (evt.type === "quality") {
-              setQualityMap(prev => ({ ...prev, [aiId]: evt.data }));
-            } else if (evt.type === "token") {
+          const evt = parseSSE(line);
+          if (!evt) continue;
+
+          switch (evt.type) {
+            case "sources":
+              setSourceMap((prev) => ({ ...prev, [aiId]: evt.data }));
+              break;
+            case "quality":
+              setQualityMap((prev) => ({ ...prev, [aiId]: evt.data }));
+              break;
+            case "token":
               appendToken(aiId, evt.data);
-            }
-          } catch {}
+              break;
+            case "error":
+              appendToken(aiId, `\n\n⚠ Error during generation: ${evt.data}`);
+              break;
+            default:
+              break;
+          }
         }
       }
     } catch (e) {
@@ -142,27 +234,97 @@ export default function App() {
     }
   };
 
-  const handleKey = e => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); query(); }
+  // ---- Event handlers ----------------------------------------------------
+  const handleKey = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      query();
+    }
   };
 
   const reset = async () => {
-    if (sessionId) await fetch(`${API}/session/${sessionId}`, { method: "DELETE" }).catch(() => {});
+    if (sessionId) {
+      try {
+        await fetch(`${API_BASE}/session/${sessionId}`, { method: "DELETE" });
+      } catch {
+        // best-effort cleanup
+      }
+    }
     setPhase("idle");
-    setSessionId(null); setSessionMeta(null); setMessages([]); setSelectedSamples([]); setUploadFiles([]); setQualityMap({}); msgSeqRef.current = 0;
+    setSessionId(null);
+    setSessionMeta(null);
+    setMessages([]);
+    setSelectedSamples([]);
+    setUploadFiles([]);
+    setQualityMap({});
+    setSourceMap({});
+    setError(null);
+    msgSeqRef.current = 0;
   };
 
-  const toggleSample = name => setSelectedSamples(prev => (prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]));
+  const toggleSample = (name) =>
+    setSelectedSamples((prev) =>
+      prev.includes(name)
+        ? prev.filter((n) => n !== name)
+        : [...prev, name],
+    );
 
+  // ---- Render ------------------------------------------------------------
   return (
     <div className="app">
       <Header sessionMeta={sessionMeta} onReset={reset} />
+
+      {error && (
+        <div className="error-banner">
+          <span>{error}</span>
+          <button onClick={() => setError(null)}>×</button>
+        </div>
+      )}
+
       <main>
-        {phase !== "ready" && <SetupPanel phase={phase} activeTab={activeTab} setActiveTab={setActiveTab} samples={samples} selectedSamples={selectedSamples} toggleSample={toggleSample} indexSamples={indexSamples} uploadFiles={uploadFiles} setUploadFiles={setUploadFiles} fileRef={fileRef} indexUpload={indexUpload} />}
+        {phase !== "ready" && (
+          <SetupPanel
+            phase={phase}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            samples={samples}
+            selectedSamples={selectedSamples}
+            toggleSample={toggleSample}
+            indexSamples={indexSamples}
+            uploadFiles={uploadFiles}
+            setUploadFiles={setUploadFiles}
+            fileRef={fileRef}
+            indexUpload={indexUpload}
+          />
+        )}
+
         {phase === "ready" && (
           <div className="chat-layout">
-            <ChatPanel messages={messages} qualityMap={qualityMap} streaming={streaming} bottomRef={bottomRef} input={input} setInput={setInput} handleKey={handleKey} query={query} topK={topK} setTopK={setTopK} alphaDense={alphaDense} setAlphaDense={setAlphaDense} alphaBm25={alphaBm25} setAlphaBm25={setAlphaBm25} answerLength={answerLength} setAnswerLength={setAnswerLength} />
-            <SidebarPanel sessionMeta={sessionMeta} topK={topK} alphaDense={alphaDense} alphaBm25={alphaBm25} answerLength={answerLength} />
+            <ChatPanel
+              messages={messages}
+              qualityMap={qualityMap}
+              streaming={streaming}
+              bottomRef={bottomRef}
+              input={input}
+              setInput={setInput}
+              handleKey={handleKey}
+              query={query}
+              topK={topK}
+              setTopK={setTopK}
+              alphaDense={alphaDense}
+              setAlphaDense={setAlphaDense}
+              alphaBm25={alphaBm25}
+              setAlphaBm25={setAlphaBm25}
+              answerLength={answerLength}
+              setAnswerLength={setAnswerLength}
+            />
+            <SidebarPanel
+              sessionMeta={sessionMeta}
+              topK={topK}
+              alphaDense={alphaDense}
+              alphaBm25={alphaBm25}
+              answerLength={answerLength}
+            />
           </div>
         )}
       </main>
